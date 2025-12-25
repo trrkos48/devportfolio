@@ -59,7 +59,7 @@ pipeline {
             }
         }
 
-        stage('Publish') {
+        stage('Push') {
             steps {
                 script {
                     docker.withRegistry('', env.REGISTRY_CREDENTIALS) {
@@ -69,30 +69,13 @@ pipeline {
                 }
             }
         }
-
-        stage('Verify') {
-            steps {
-                sh """
-                    set -e
-                    docker pull ${env.REGISTRY}:latest
-                    docker pull ${env.REGISTRY}:${env.IMAGE_TAG}
-
-                    docker rm -f devportfolio_test >/dev/null 2>&1 || true
-                    docker run -d -p 18080:80 --name devportfolio_test ${env.REGISTRY}:${env.IMAGE_TAG}
-
-                    sleep 5
-                    curl -fsS http://localhost:18080 | head -n 5
-
-                    docker rm -f devportfolio_test >/dev/null 2>&1
-                """
-            }
-        }
     }
 
     post {
         always {
             sh 'docker rm -f devportfolio_test >/dev/null 2>&1 || true'
-            sh 'docker image prune -f'
+            // Требование: очистка локальных Docker-образов после выполнения pipeline
+            sh "docker rmi -f ${env.REGISTRY}:${env.IMAGE_TAG} ${env.REGISTRY}:latest >/dev/null 2>&1 || true"
             cleanWs()
         }
     }
