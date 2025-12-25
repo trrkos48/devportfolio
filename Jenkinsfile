@@ -15,6 +15,16 @@ pipeline {
         stage('Checkout') {
             steps {
                 checkout scm
+                script {
+                    def shortSha = env.GIT_COMMIT?.take(7)
+                    if (!shortSha?.trim()) {
+                        shortSha = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+                    }
+                    env.IMAGE_TAG = env.BUILD_NUMBER
+                    if (shortSha) {
+                        env.IMAGE_TAG = "${env.BUILD_NUMBER}-${shortSha}"
+                    }
+                }
             }
         }
 
@@ -29,15 +39,19 @@ pipeline {
         stage('Scan') {
             steps {
                 script {
-                    // fail the build on high/critical vulnerabilities
                     sh """
                         trivy image \
                           --exit-code 1 \
                           --severity HIGH,CRITICAL \
                           --ignore-unfixed \
+                          --no-progress \
+                          --format table \
+                          --output trivy-report.txt \
                           ${REGISTRY}:${IMAGE_TAG}
+                        cat trivy-report.txt
                     """
                 }
+                archiveArtifacts artifacts: 'trivy-report.txt', fingerprint: true
             }
         }
 
@@ -51,10 +65,28 @@ pipeline {
                 }
             }
         }
+
+        stage('Verify') {
+            steps {
+                script {
+                    sh """
+                        set -e
+                        docker pull ${REGISTRY}:latest
+                        docker pull ${REGISTRY}:${IMAGE_TAG}
+                        docker rm -f devportfolio_test >/dev/null 2>&1 || true
+                        docker run -d -p 18080:80 --name devportfolio_test ${REGISTRY}:${IMAGE_TAG}
+                        sleep 5
+                        curl -fsS http://localhost:18080 | head -n 5
+                        docker rm -f devportfolio_test >/dev/null 2>&1
+                    """
+                }
+            }
+        }
     }
 
     post {
         always {
+            sh 'docker rm -f devportfolio_test >/dev/null 2>&1 || true'
             sh "docker image prune -f"
         }
     }
