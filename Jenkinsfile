@@ -8,7 +8,6 @@ pipeline {
     }
 
     options {
-        ansiColor('xterm')
         timestamps()
     }
 
@@ -19,35 +18,41 @@ pipeline {
             }
         }
 
-        stage('Build image') {
+        stage('Build') {
             steps {
-                script {
-                    sh "docker build -t ${REGISTRY}:${IMAGE_TAG} -t ${REGISTRY}:latest ."
+                ansiColor('xterm') {
+                    script {
+                        sh "docker build -t ${REGISTRY}:${IMAGE_TAG} -t ${REGISTRY}:latest ."
+                    }
                 }
             }
         }
 
-        stage('Trivy scan') {
+        stage('Scan') {
             steps {
-                script {
-                    // fail the build on high/critical vulnerabilities
-                    sh """
-                        trivy image \
-                          --exit-code 1 \
-                          --severity HIGH,CRITICAL \
-                          --ignore-unfixed \
-                          ${REGISTRY}:${IMAGE_TAG}
-                    """
+                ansiColor('xterm') {
+                    script {
+                        // fail the build on high/critical vulnerabilities
+                        sh """
+                            trivy image \
+                              --exit-code 1 \
+                              --severity HIGH,CRITICAL \
+                              --ignore-unfixed \
+                              ${REGISTRY}:${IMAGE_TAG}
+                        """
+                    }
                 }
             }
         }
 
-        stage('Push image') {
+        stage('Publish') {
             steps {
-                script {
-                    docker.withRegistry('', REGISTRY_CREDENTIALS) {
-                        sh "docker push ${REGISTRY}:${IMAGE_TAG}"
-                        sh "docker push ${REGISTRY}:latest"
+                ansiColor('xterm') {
+                    script {
+                        docker.withRegistry('', REGISTRY_CREDENTIALS) {
+                            sh "docker push ${REGISTRY}:${IMAGE_TAG}"
+                            sh "docker push ${REGISTRY}:latest"
+                        }
                     }
                 }
             }
