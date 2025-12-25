@@ -22,7 +22,11 @@ pipeline {
                     if (!shortSha?.trim()) {
                         shortSha = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
                     }
-                    env.IMAGE_TAG = "${env.BUILD_NUMBER}-${shortSha}"
+                    // Требование: если sha пустой — использовать только BUILD_NUMBER
+                    env.IMAGE_TAG = env.BUILD_NUMBER
+                    if (shortSha?.trim()) {
+                        env.IMAGE_TAG = "${env.BUILD_NUMBER}-${shortSha}"
+                    }
                 }
             }
         }
@@ -39,7 +43,8 @@ pipeline {
                     set -e
                     docker run --rm \
                       -v /var/run/docker.sock:/var/run/docker.sock \
-                      aquasec/trivy:latest image \
+                      -v "${WORKSPACE}:/work" -w /work \
+                      aquasec/trivy:0.51.4 image \
                         --exit-code 1 \
                         --severity HIGH,CRITICAL \
                         --ignore-unfixed \
@@ -69,6 +74,7 @@ pipeline {
             steps {
                 sh """
                     set -e
+                    docker pull ${env.REGISTRY}:latest
                     docker pull ${env.REGISTRY}:${env.IMAGE_TAG}
 
                     docker rm -f devportfolio_test >/dev/null 2>&1 || true
@@ -76,6 +82,8 @@ pipeline {
 
                     sleep 5
                     curl -fsS http://localhost:18080 | head -n 5
+
+                    docker rm -f devportfolio_test >/dev/null 2>&1
                 """
             }
         }
