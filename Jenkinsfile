@@ -4,11 +4,13 @@ pipeline {
     environment {
         REGISTRY             = 'trrkos/devportfolio'
         REGISTRY_CREDENTIALS = 'docker-hub'
-        IMAGE_TAG            = "${env.BUILD_NUMBER}"
+        IMAGE_TAG            = "${env.BUILD_NUMBER}"   // будет переопределён в Checkout
     }
 
     options {
         timestamps()
+        disableConcurrentBuilds()
+        timeout(time: 30, unit: 'MINUTES')
     }
 
     stages {
@@ -20,37 +22,34 @@ pipeline {
                     if (!shortSha?.trim()) {
                         shortSha = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
                     }
-                    env.IMAGE_TAG = env.BUILD_NUMBER
-                    if (shortSha) {
-                        env.IMAGE_TAG = "${env.BUILD_NUMBER}-${shortSha}"
-                    }
+                    env.IMAGE_TAG = "${env.BUILD_NUMBER}-${shortSha}"
                 }
             }
         }
 
         stage('Build') {
             steps {
-                script {
-                    sh "docker build -t ${REGISTRY}:${IMAGE_TAG} -t ${REGISTRY}:latest ."
-                }
+                sh "docker build -t ${env.REGISTRY}:${env.IMAGE_TAG} -t ${env.REGISTRY}:latest ."
             }
         }
 
         stage('Scan') {
             steps {
-                script {
-                    sh """
-                        trivy image \
-                          --exit-code 1 \
-                          --severity HIGH,CRITICAL \
-                          --ignore-unfixed \
-                          --no-progress \
-                          --format table \
-                          --output trivy-report.txt \
-                          ${REGISTRY}:${IMAGE_TAG}
-                        cat trivy-report.txt
-                    """
-                }
+                sh """
+                    set -e
+                    docker run --rm \
+                      -v /var/run/docker.sock:/var/run/docker.sock \
+                      aquasec/trivy:latest image \
+                        --exit-code 1 \
+                        --severity HIGH,CRITICAL \
+                        --ignore-unfixed \
+                        --no-progress \
+                        --format table \
+                        --output trivy-report.txt \
+                        ${env.REGISTRY}:${env.IMAGE_TAG}
+
+                    cat trivy-report.txt
+                """
                 archiveArtifacts artifacts: 'trivy-report.txt', fingerprint: true
             }
         }
@@ -58,9 +57,9 @@ pipeline {
         stage('Publish') {
             steps {
                 script {
-                    docker.withRegistry('', REGISTRY_CREDENTIALS) {
-                        sh "docker push ${REGISTRY}:${IMAGE_TAG}"
-                        sh "docker push ${REGISTRY}:latest"
+                    docker.withRegistry('', env.REGISTRY_CREDENTIALS) {
+                        sh "docker push ${env.REGISTRY}:${env.IMAGE_TAG}"
+                        sh "docker push ${env.REGISTRY}:latest"
                     }
                 }
             }
@@ -68,18 +67,16 @@ pipeline {
 
         stage('Verify') {
             steps {
-                script {
-                    sh """
-                        set -e
-                        docker pull ${REGISTRY}:latest
-                        docker pull ${REGISTRY}:${IMAGE_TAG}
-                        docker rm -f devportfolio_test >/dev/null 2>&1 || true
-                        docker run -d -p 18080:80 --name devportfolio_test ${REGISTRY}:${IMAGE_TAG}
-                        sleep 5
-                        curl -fsS http://localhost:18080 | head -n 5
-                        docker rm -f devportfolio_test >/dev/null 2>&1
-                    """
-                }
+                sh """
+                    set -e
+                    docker pull ${env.REGISTRY}:${env.IMAGE_TAG}
+
+                    docker rm -f devportfolio_test >/dev/null 2>&1 || true
+                    docker run -d -p 18080:80 --name devportfolio_test ${env.REGISTRY}:${env.IMAGE_TAG}
+
+                    sleep 5
+                    curl -fsS http://localhost:18080 | head -n 5
+                """
             }
         }
     }
@@ -87,8 +84,8 @@ pipeline {
     post {
         always {
             sh 'docker rm -f devportfolio_test >/dev/null 2>&1 || true'
-            sh "docker image prune -f"
+            sh 'docker image prune -f'
+            cleanWs()
         }
     }
 }
-
